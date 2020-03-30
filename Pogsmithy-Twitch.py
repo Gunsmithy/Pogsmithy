@@ -4,21 +4,17 @@ import socket
 import websockets
 import time
 from datetime import datetime
-from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 import logging
 import requests
 import threading
+import os
+import argparse
 
 last_huge_pog = datetime.utcnow()
 last_huge_squad = datetime.utcnow()
 huge_pog_cooldown_seconds = 30
 huge_squad_cooldown_seconds = 30
 
-client_prefix = 'Pogsmithy-'
-host = 'a2m4xpt70plp30.iot.us-east-1.amazonaws.com'
-rootCAPath = 'root-CA.crt'
-certificatePath = 'fd6ab5b8e9-certificate.pem.crt'
-privateKeyPath = 'fd6ab5b8e9-private.pem.key'
 twitch_wss_uri = "wss://irc-ws.chat.twitch.tv:443"
 max_backoff = 64
 backoff_time = 1
@@ -27,7 +23,7 @@ backoff_time = 1
 port = 8883
 
 # Configure logging
-logger = logging.getLogger("AWSIoTPythonSDK.core")
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 streamHandler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -363,30 +359,65 @@ async def handle_messages(websocket_client, channel_name):
             pass
 
 
-def main():
-    if len(sys.argv) != 5:
-        print("Usage: python3 chatbot.py <username> <client id> <token> <channel>")
+def read_secret_file(file_path):
+    with open(file_path, 'r') as auth_file:
+        return auth_file.readline()
+
+
+def config():
+    bot_user = os.getenv('POGSMITHY_TWITCH_USER')
+    bot_channel = os.getenv('POGSMITHY_TWITCH_CHANNEL')
+    bot_token = os.getenv('POGSMITHY_TWITCH_TOKEN')
+    bot_token_file = os.getenv('POGSMITHY_TWITCH_TOKEN_FILE')
+
+    parser = argparse.ArgumentParser(description='Run Pogsmithy for Twitch.')
+    parser.add_argument('--user', dest='user', help='The Twitch User used to run the bot.')
+    parser.add_argument('--channel', dest='channel', help='The Twitch channel in which to run the bot.')
+    parser.add_argument('--token', dest='token', help='The Twitch OAuth token used to run the bot.')
+    parser.add_argument('--token-file', dest='token_file', help='The path to the file containing the Twitch OAuth token'
+                                                                ' used to run the bot.')
+    args = parser.parse_args()
+
+    if args.user is not None:
+        print('Using --user command-line argument...')
+        user = args.user
+    elif bot_user is not None:
+        print('Using POGSMITHY_TWITCH_USER environment variable...')
+        user = bot_user
+    else:
+        print('Bot user could not be derived from environment or arguments. Aborting...')
         sys.exit(1)
 
-    username = sys.argv[1]
-    # client_id = sys.argv[2]
-    token = sys.argv[3]
-    channel = sys.argv[4]
+    if args.channel is not None:
+        print('Using --channel command-line argument...')
+        channel = args.channel
+    elif bot_channel is not None:
+        print('Using POGSMITHY_TWITCH_CHANNEL environment variable...')
+        channel = bot_channel
+    else:
+        print('Bot channel could not be derived from environment or arguments. Aborting...')
+        sys.exit(1)
 
-    # Init AWSIoTMQTTClient
-    my_aws_iot_mqtt_client = AWSIoTMQTTClient(client_prefix + channel)
-    my_aws_iot_mqtt_client.configureEndpoint(host, port)
-    my_aws_iot_mqtt_client.configureCredentials(rootCAPath, privateKeyPath, certificatePath)
+    if args.token is not None:
+        print('Using --token command-line argument...')
+        token = args.token
+    elif args.token_file is not None:
+        print('Using --token-file command-line argument...')
+        token = read_secret_file(args.token_file)
+    elif bot_token is not None:
+        print('Using POGSMITHY_TWITCH_TOKEN environment variable...')
+        token = bot_token
+    elif bot_token_file is not None:
+        print('Using POGSMITHY_TWITCH_TOKEN_FILE environment variable...')
+        token = read_secret_file(bot_token_file)
+    else:
+        print('Bot token could not be derived from environment or arguments. Aborting...')
+        sys.exit(1)
 
-    # AWSIoTMQTTClient connection configuration
-    my_aws_iot_mqtt_client.configureAutoReconnectBackoffTime(1, 32, 20)
-    my_aws_iot_mqtt_client.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
-    my_aws_iot_mqtt_client.configureDrainingFrequency(2)  # Draining: 2 Hz
-    my_aws_iot_mqtt_client.configureConnectDisconnectTimeout(10)  # 10 sec
-    my_aws_iot_mqtt_client.configureMQTTOperationTimeout(5)  # 5 sec
+    return user, channel, token
 
-    my_aws_iot_mqtt_client.connect()
 
+def main(username, channel, token):
     while True:
         time.sleep(backoff_time)
         try:
@@ -403,4 +434,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    config_user, config_channel, config_token = config()
+    main(config_user, config_channel, config_token)

@@ -1,0 +1,15 @@
+# Ignore Python environment
+venv
+.python-version
+
+# Ignore Docker stuff
+pogsmithy-twitch-common.yml
+docker-compose.yml
+Dockerfile
+
+# Ignore IoT certs and keys
+*.crt
+*.key
+
+# Ignore specific text files
+BotToken.txt

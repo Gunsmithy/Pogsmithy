@@ -2,4 +2,3 @@ requests>=2.22.0
 pytz>=2019.3
 asyncio>=3.4.3
 websockets>=8.1
-AWSIoTPythonSDK>=1.4.7

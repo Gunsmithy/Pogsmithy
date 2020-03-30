@@ -1,0 +1,17 @@
+---
+version: "3.7"
+services:
+  pogsmithy-twitch-gunsmithy:
+    image: gunsmithy/personal:pogsmithy-twitch
+    container_name: pogsmithy-twitch-gunsmithy
+    environment:
+      POGSMITHY_TWITCH_CHANNEL: gunsmithy
+      POGSMITHY_TWITCH_USER: Pogsmithy
+      POGSMITHY_TWITCH_TOKEN_FILE: /run/secrets/pogsmithy_twitch_token
+    secrets:
+      - pogsmithy_twitch_token
+    restart: unless-stopped
+
+secrets:
+  pogsmithy_twitch_token:
+    file: BotToken.txt

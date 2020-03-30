@@ -106,3 +106,6 @@ venv.bak/
 # Certs and Keys
 *.crt
 *.key
+
+# Ignore specific text files
+BotToken.txt
