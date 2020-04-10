@@ -5,10 +5,19 @@ import websockets
 import time
 from datetime import datetime
 import logging
+import signal
 import requests
 import threading
 import os
+import shutil
 import argparse
+import pickle
+import os.path
+import pytz
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 
 last_huge_pog = datetime.utcnow()
 last_huge_squad = datetime.utcnow()
@@ -29,6 +38,16 @@ streamHandler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 streamHandler.setFormatter(formatter)
 logger.addHandler(streamHandler)
+log_rotation = 0
+
+twitch_chat_logger = None
+config_user = None
+config_channel = None
+config_token = None
+config_drive_folder_id = None
+config_drive_pickle = None
+log_timer = None
+log_frequency = 86400  # 1 day
 
 rank_names = {}
 rank_mmrs = {}
@@ -150,48 +169,48 @@ def parse_irc_message(websocket_message):
 
         return tags, user, command, message
     except:
-        print("Error parsing this message: " + websocket_message)
+        logger.error("Error parsing this message: " + websocket_message)
 
 
 async def connect_client(token, user):
-    print('Attempting to connect...')
+    logger.info('Attempting to connect...')
     websocket_client = await websockets.connect(twitch_wss_uri, ssl=True)
     await websocket_client.send("PASS {}".format(token))
     await websocket_client.send("NICK {}".format(user))
     name = await websocket_client.recv()
-    print(f"< {name}")
+    logger.debug(f"< {name}")
     return websocket_client
 
 
 async def join_channel(websocket_client, channel_name):
     await websocket_client.send("JOIN #{}".format(channel_name))
     stuff = await websocket_client.recv()
-    print(f"< {stuff}")
+    logger.debug(f"< {stuff}")
 
 
 async def request_capabilities(websocket_client):
     await websocket_client.send("CAP REQ :twitch.tv/membership")
     stuff = await websocket_client.recv()
-    print(f"< {stuff}")
+    logger.debug(f"< {stuff}")
     await websocket_client.send("CAP REQ :twitch.tv/tags")
     stuff = await websocket_client.recv()
-    print(f"< {stuff}")
+    logger.debug(f"< {stuff}")
     await websocket_client.send("CAP REQ :twitch.tv/commands")
     stuff = await websocket_client.recv()
-    print(f"< {stuff}")
+    logger.debug(f"< {stuff}")
 
 
 async def send_message(websocket_client, channel_name, message):
     await websocket_client.send("PRIVMSG #{} :{}".format(channel_name, message))
     # This kills the huge pogs
     # response = await websocket_client.recv()
-    # print(f"< {response}")
+    # logger.debug(f"< {response}")
 
 
 async def handle_command(websocket_client, channel, user, command, args):
     if command == 'pogproxy':
         proxy_command = ' '.join(args)
-        print(user + ' sent a pogproxy command: ' + proxy_command)
+        logger.info(user + ' sent a pogproxy command: ' + proxy_command)
         if user == 'gunsmithy':
             await send_message(websocket_client, channel, proxy_command)
     elif command == "paxy":
@@ -244,7 +263,7 @@ async def handle_command(websocket_client, channel, user, command, args):
         await send_message(websocket_client, channel,
                            'sasslySip sasslyHype sasslySip sasslyHype sasslySip sasslyHype sasslySip')
     else:
-        print("Unrecognized command: " + command)
+        logger.debug("Unrecognized command: " + command)
 
 
 async def huge_pogs(websocket_client, channel):
@@ -330,33 +349,42 @@ async def handle_message(websocket_client, channel, user, message):
         await send_message(websocket_client, channel, smile_string)
 
 
-async def handle_messages(websocket_client, channel_name):
+def shout_out(websocket_client, channel_name, display_name, login):
+    shout_out_message = f"HEY! Make sure you shoot {display_name} a good ole follow over at http://twitch.tv/{login}"
+    send_message(websocket_client, channel_name, shout_out_message)
+
+
+async def handle_messages(websocket_client, channel_name, chat_logger, folder_id):
     while True:
         try:
             received = await asyncio.wait_for(websocket_client.recv(), timeout=60.0)
 
             if received == "PING :tmi.twitch.tv\r\n":
-                print('PING received, responding with PONG.')
+                logger.debug('PING received, responding with PONG.')
                 await websocket_client.send("PONG :tmi.twitch.tv\r\n")  # TODO - Maybe wrap this call in a wait_for too?
+                continue
 
             tags, user, command, message = parse_irc_message(received)
 
             if command == "PRIVMSG":
+                chat_logger.info(f'{user} - {message}')
                 await handle_message(websocket_client, channel_name, user, message)
             elif command == "USERNOTICE":
                 if tags.get('msg-id') == 'raid':
                     if int(tags['msg-param-viewerCount']) > 1:
-                        shoutout_message = "HEY! Make sure you shoot {} a good ole follow over at http://twitch.tv/{}" \
-                            .format(tags['msg-param-displayName'], tags['msg-param-login'])
-                        await send_message(websocket_client, channel_name, shoutout_message)
+                        shoutout_timer = threading.Timer(5, shout_out, [websocket_client, channel_name,
+                                                                        tags['msg-param-displayName'],
+                                                                        tags['msg-param-login']])
+                        shoutout_timer.start()
             else:
-                print("Not a PRIVMSG or USERNOTICE, outputting below:")
-                print(f"< {received}")
+                logger.debug("Not a PRIVMSG or USERNOTICE, outputting below:")
+                logger.debug(f"< {received}")
         except asyncio.TimeoutError:
-            # FIXME - Is this supposed to timeout every time?
-            # FIXME - Only times out when no messages have been received in the timeout period set above, seems fine
-            # print('Timeout: ' + datetime.datetime.now(pytz.timezone('America/Toronto')).isoformat(timespec='seconds'))
+            # current_time_string = datetime.now(pytz.timezone('America/Toronto')).isoformat(timespec='seconds')
+            # logger.debug(f'Timeout: {current_time_string}')
             pass
+        except KeyboardInterrupt:
+            shutdown()
 
 
 def read_secret_file(file_path):
@@ -369,6 +397,8 @@ def config():
     bot_channel = os.getenv('POGSMITHY_TWITCH_CHANNEL')
     bot_token = os.getenv('POGSMITHY_TWITCH_TOKEN')
     bot_token_file = os.getenv('POGSMITHY_TWITCH_TOKEN_FILE')
+    bot_drive_folder = os.getenv('POGSMITHY_TWITCH_GDRIVE_FOLDER')
+    bot_drive_pickle_file = os.getenv('POGSMITHY_TWITCH_GDRIVE_PICKLE')
 
     parser = argparse.ArgumentParser(description='Run Pogsmithy for Twitch.')
     parser.add_argument('--user', dest='user', help='The Twitch User used to run the bot.')
@@ -376,48 +406,170 @@ def config():
     parser.add_argument('--token', dest='token', help='The Twitch OAuth token used to run the bot.')
     parser.add_argument('--token-file', dest='token_file', help='The path to the file containing the Twitch OAuth token'
                                                                 ' used to run the bot.')
+    parser.add_argument('--gdrive-folder', dest='gdrive_folder', help='The ID of the Google Drive folder for chat logs'
+                                                                      'if desired.')
+    parser.add_argument('--gdrive-pickle', dest='gdrive_pickle', help='The path to the Google Drive credentials pickle '
+                                                                      'file if uploading chat logs.')
     args = parser.parse_args()
 
     if args.user is not None:
-        print('Using --user command-line argument...')
+        logger.info('Using --user command-line argument...')
         user = args.user
     elif bot_user is not None:
-        print('Using POGSMITHY_TWITCH_USER environment variable...')
+        logger.info('Using POGSMITHY_TWITCH_USER environment variable...')
         user = bot_user
     else:
-        print('Bot user could not be derived from environment or arguments. Aborting...')
+        logger.error('Bot user could not be derived from environment or arguments. Aborting...')
         sys.exit(1)
 
     if args.channel is not None:
-        print('Using --channel command-line argument...')
+        logger.info('Using --channel command-line argument...')
         channel = args.channel
     elif bot_channel is not None:
-        print('Using POGSMITHY_TWITCH_CHANNEL environment variable...')
+        logger.info('Using POGSMITHY_TWITCH_CHANNEL environment variable...')
         channel = bot_channel
     else:
-        print('Bot channel could not be derived from environment or arguments. Aborting...')
+        logger.error('Bot channel could not be derived from environment or arguments. Aborting...')
         sys.exit(1)
 
     if args.token is not None:
-        print('Using --token command-line argument...')
+        logger.info('Using --token command-line argument...')
         token = args.token
     elif args.token_file is not None:
-        print('Using --token-file command-line argument...')
+        logger.info('Using --token-file command-line argument...')
         token = read_secret_file(args.token_file)
     elif bot_token is not None:
-        print('Using POGSMITHY_TWITCH_TOKEN environment variable...')
+        logger.info('Using POGSMITHY_TWITCH_TOKEN environment variable...')
         token = bot_token
     elif bot_token_file is not None:
-        print('Using POGSMITHY_TWITCH_TOKEN_FILE environment variable...')
+        logger.info('Using POGSMITHY_TWITCH_TOKEN_FILE environment variable...')
         token = read_secret_file(bot_token_file)
     else:
-        print('Bot token could not be derived from environment or arguments. Aborting...')
+        logger.error('Bot token could not be derived from environment or arguments. Aborting...')
         sys.exit(1)
 
-    return user, channel, token
+    if args.gdrive_folder is not None:
+        logger.info('Using --gdrive-folder command-line argument...')
+        folder_id = args.gdrive_folder
+    elif bot_drive_folder is not None:
+        logger.info('Using POGSMITHY_TWITCH_GDRIVE_FOLDER environment variable...')
+        folder_id = bot_drive_folder
+    else:
+        logger.info('No Google Drive folder ID provided. Chat logs will not be uploaded.')
+        folder_id = None
+
+    if args.gdrive_pickle is not None:
+        logger.info('Using --gdrive-pickle command-line argument...')
+        drive_pickle_file = args.gdrive_pickle
+    elif bot_drive_pickle_file is not None:
+        logger.info('Using POGSMITHY_TWITCH_GDRIVE_PICKLE environment variable...')
+        drive_pickle_file = bot_drive_pickle_file
+    else:
+        logger.info('No Google Drive pickle file provided. Chat logs will not be uploaded.')
+        drive_pickle_file = None
+
+    return user, channel, token, folder_id, drive_pickle_file
 
 
-def main(username, channel, token):
+def create_chat_logger():
+    # Logger for chat messages
+    chat_logger = logging.getLogger("ChatLogger")
+    chat_logger.setLevel(logging.INFO)
+    chat_file_log_handler = logging.FileHandler('twitch-chat-0.log', mode='w')
+    chat_file_log_handler.setLevel(logging.INFO)
+    chat_formatter = logging.Formatter('%(asctime)s - %(message)s')
+    chat_file_log_handler.setFormatter(chat_formatter)
+    chat_logger.addHandler(chat_file_log_handler)
+
+    return chat_logger
+
+
+def upload_log_file(log_name, folder_id, drive_pickle):
+    if not folder_id:
+        logger.debug('Folder ID was not provided. Deleting chat logs...')
+        os.remove(log_name)
+        return
+    if not drive_pickle:
+        logger.debug('Drive pickle was not provided. Deleting chat logs...')
+        os.remove(log_name)
+        return
+    if os.path.getsize(log_name) == 0:
+        logger.debug(f'{log_name} is empty. Deleting chat logs...')
+        os.remove(log_name)
+        return
+    else:
+        logger.debug(f'{log_name} is not empty. Uploading...')
+
+    creds = None
+    # The file token.pickle stores the user's access and refresh tokens, and is created automatically when the
+    # authorization flow completes for the first time.
+    if os.path.exists(drive_pickle):
+        with open(drive_pickle, 'rb') as token:
+            creds = pickle.load(token)
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            try:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'credentials.json', ['https://www.googleapis.com/auth/drive'])
+                creds = flow.run_local_server(port=0)
+            except (FileNotFoundError, IOError) as e:
+                logger.error('Credentials expired and could not open credentials.json. Probably running in Docker.'
+                             'Not uploading or deleting log file.')
+                return
+        # Save the credentials for the next run
+        with open(drive_pickle, 'wb') as token:
+            pickle.dump(creds, token)
+
+    drive_service = build('drive', 'v3', credentials=creds)
+
+    file_metadata = {
+        'name': log_name,
+        'parents': [folder_id],
+    }
+    media = MediaFileUpload(log_name, mimetype='text/plain')
+    drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    del media
+    os.remove(log_name)
+
+
+def move_log_file(channel_name):
+    global log_rotation
+    current_time_string = datetime.now(pytz.timezone('America/Toronto')).isoformat(timespec='seconds').replace(':', '.')
+    logger.debug(f'Moving log file {log_rotation} at {current_time_string}')
+    new_log_name = f'Twitch-Chat-{channel_name}-{current_time_string}.txt'
+    shutil.move(f'twitch-chat-{log_rotation}.log', new_log_name)
+
+    return new_log_name
+
+
+def rotate_log_file(channel_name, folder_id, chat_logger):
+    global log_rotation, log_timer
+    chat_file_log_handler = logging.FileHandler(f'twitch-chat-{log_rotation+1}.log', mode='w')
+    chat_file_log_handler.setLevel(logging.INFO)
+    chat_formatter = logging.Formatter('%(asctime)s - %(message)s')
+    chat_file_log_handler.setFormatter(chat_formatter)
+    chat_logger.addHandler(chat_file_log_handler)
+    chat_logger.removeHandler(chat_logger.handlers[0])
+    new_log_name = move_log_file(channel_name)
+    upload_log_file(new_log_name, folder_id, config_drive_pickle)
+    log_rotation += 1
+    log_timer = threading.Timer(log_frequency, rotate_log_file, [config_channel, config_drive_folder_id, chat_logger])
+    log_timer.start()
+
+
+def shutdown():
+    logger.info('Shutting down...')
+    twitch_chat_logger.removeHandler(twitch_chat_logger.handlers[0])
+    new_log_name = move_log_file(config_channel)
+    upload_log_file(new_log_name, config_drive_folder_id, config_drive_pickle)
+    log_timer.cancel()
+    sys.exit(1)
+
+
+def main(username, channel, token, chat_logger, folder_id):
     while True:
         time.sleep(backoff_time)
         try:
@@ -425,14 +577,28 @@ def main(username, channel, token):
             reset_backoff()
             asyncio.get_event_loop().run_until_complete(join_channel(client, channel))
             asyncio.get_event_loop().run_until_complete(request_capabilities(client))
-            asyncio.get_event_loop().run_until_complete(handle_messages(client, channel))
+            asyncio.get_event_loop().run_until_complete(handle_messages(client, channel, chat_logger, folder_id))
         except websockets.exceptions.ConnectionClosedError:
-            print('Oof, ConnectionClosedError')
+            logger.error('Oof, ConnectionClosedError')
         except socket.gaierror:
-            print('Oof, gaierror')
+            logger.error('Oof, gaierror')
             increase_backoff()
+        except KeyboardInterrupt:
+            shutdown()
+
+
+def receive_signal(signal_number, frame):
+    if signal_number == signal.SIGINT or signal_number == signal.SIGTERM:
+        shutdown()
+    return
 
 
 if __name__ == "__main__":
-    config_user, config_channel, config_token = config()
-    main(config_user, config_channel, config_token)
+    config_user, config_channel, config_token, config_drive_folder_id, config_drive_pickle = config()
+    twitch_chat_logger = create_chat_logger()
+    signal.signal(signal.SIGINT, receive_signal)
+    signal.signal(signal.SIGTERM, receive_signal)
+    log_timer = threading.Timer(log_frequency, rotate_log_file,
+                                [config_channel, config_drive_folder_id, twitch_chat_logger])
+    log_timer.start()
+    main(config_user, config_channel, config_token, twitch_chat_logger, config_drive_folder_id)
