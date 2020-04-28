@@ -1,5 +1,6 @@
 import sys
 import asyncio
+import queue
 import socket
 import websockets
 import time
@@ -48,6 +49,7 @@ config_drive_folder_id = None
 config_drive_pickle = None
 log_timer = None
 log_frequency = 86400  # 1 day
+shoutout_queue = queue.Queue()
 
 rank_names = {}
 rank_mmrs = {}
@@ -60,17 +62,17 @@ account_uuids = {
     'DoubleEh7': 'a0ae5914-21ae-4850-9482-fb10e294492e',
 }
 
-banned_words_original = {'thanos', 'marvel', 'avengers', 'ironman', 'antman', 'hulk', 'endgame', 'thor', 'blackwidow',
-                         'captainamerica', 'spiderman', 'spider-man', 'infinity', 'gauntlet'}
+banned_words_original = {'joel', 'ellie', 'tlou', 'naughtydog', 'lastofus'}
 banned_words_permutated = set().union(banned_words_original)
 leet_speak_map = {
-    'a': '@',
-    'o': '0',
-    'i': '1',
-    't': '7',
-    's': '5',
-    'e': '3',
-    'b': '8'
+    'a': ['@'],
+    'o': ['0'],
+    'i': ['1', 'l', '!'],
+    'l': ['1', 'i', '!'],
+    't': ['7'],
+    's': ['5'],
+    'e': ['3'],
+    'b': ['8']
 }
 
 
@@ -81,10 +83,11 @@ def create_permutations(passed_word):
         original_word_end = passed_word[index:]
         for letter in original_word_end:
             if letter in leet_speak_map.keys():
-                new_word = original_word_start + original_word_end.replace(letter, leet_speak_map[letter])
-                if new_word not in banned_words_permutated:
-                    banned_words_permutated.add(new_word)
-                    create_permutations(new_word)
+                for new_letter in leet_speak_map[letter]:
+                    new_word = original_word_start + original_word_end.replace(letter, new_letter)
+                    if new_word not in banned_words_permutated:
+                        banned_words_permutated.add(new_word)
+                        create_permutations(new_word)
         index += 1
 
 
@@ -282,10 +285,10 @@ async def handle_message(websocket_client, channel, user, message):
 
     msg_lower = message.lower()
 
-    # CHECK FOR POTENTIAL ENDGAME SPOILERS
-    # if spoiler_check(e.arguments[0]):
-    #     send_message(websocket_client, channel, "/timeout " + user + " 1")
-    #     send_message(websocket_client, channel, "@" + user + " #DontSpoilTheEndgame marvHowdy")
+    # CHECK FOR POTENTIAL LAST OF US 2 SPOILERS
+    if spoiler_check(message):
+        await send_message(websocket_client, channel, "/timeout " + user + " 1")
+        await send_message(websocket_client, channel, "@" + user + " No Last of Us 2 spoilers! marvHowdy")
 
     # If a chat message starts with an exclamation point, try to run it as a command
     if message.startswith('!'):
@@ -349,12 +352,32 @@ async def handle_message(websocket_client, channel, user, message):
         await send_message(websocket_client, channel, smile_string)
 
 
-def shout_out(websocket_client, channel_name, display_name, login):
+async def shoutout_run_loop():
+    while True:
+        queue_item = shoutout_queue.get()
+        if queue_item is None:
+            break
+        time.sleep(5)
+        await shout_out(queue_item['WebsocketClient'], queue_item['ChannelName'], queue_item['DisplayName'],
+                        queue_item['Login'])
+
+
+class ShoutoutThread(threading.Thread):
+
+    def __init__(self):
+        asyncio.get_event_loop()
+        threading.Thread.__init__(self)
+
+    def run(self):
+        asyncio.new_event_loop().run_until_complete(shoutout_run_loop())
+
+
+async def shout_out(websocket_client, channel_name, display_name, login):
     shout_out_message = f"HEY! Make sure you shoot {display_name} a good ole follow over at http://twitch.tv/{login}"
-    send_message(websocket_client, channel_name, shout_out_message)
+    await send_message(websocket_client, channel_name, shout_out_message)
 
 
-async def handle_messages(websocket_client, channel_name, chat_logger, folder_id):
+async def handle_messages(websocket_client, channel_name, chat_logger):
     while True:
         try:
             received = await asyncio.wait_for(websocket_client.recv(), timeout=60.0)
@@ -372,10 +395,12 @@ async def handle_messages(websocket_client, channel_name, chat_logger, folder_id
             elif command == "USERNOTICE":
                 if tags.get('msg-id') == 'raid':
                     if int(tags['msg-param-viewerCount']) > 1:
-                        shoutout_timer = threading.Timer(5, shout_out, [websocket_client, channel_name,
-                                                                        tags['msg-param-displayName'],
-                                                                        tags['msg-param-login']])
-                        shoutout_timer.start()
+                        shoutout_queue.put({
+                            "WebsocketClient": websocket_client,
+                            "ChannelName": channel_name,
+                            "DisplayName": tags['msg-param-displayName'],
+                            "Login": tags['msg-param-login']
+                        })
             else:
                 logger.debug("Not a PRIVMSG or USERNOTICE, outputting below:")
                 logger.debug(f"< {received}")
@@ -566,10 +591,11 @@ def shutdown():
     new_log_name = move_log_file(config_channel)
     upload_log_file(new_log_name, config_drive_folder_id, config_drive_pickle)
     log_timer.cancel()
+    shoutout_queue.put(None)
     sys.exit(1)
 
 
-def main(username, channel, token, chat_logger, folder_id):
+def main(username, channel, token, chat_logger):
     while True:
         time.sleep(backoff_time)
         try:
@@ -577,7 +603,7 @@ def main(username, channel, token, chat_logger, folder_id):
             reset_backoff()
             asyncio.get_event_loop().run_until_complete(join_channel(client, channel))
             asyncio.get_event_loop().run_until_complete(request_capabilities(client))
-            asyncio.get_event_loop().run_until_complete(handle_messages(client, channel, chat_logger, folder_id))
+            asyncio.get_event_loop().run_until_complete(handle_messages(client, channel, chat_logger))
         except websockets.exceptions.ConnectionClosedError:
             logger.error('Oof, ConnectionClosedError')
         except socket.gaierror:
@@ -601,4 +627,6 @@ if __name__ == "__main__":
     log_timer = threading.Timer(log_frequency, rotate_log_file,
                                 [config_channel, config_drive_folder_id, twitch_chat_logger])
     log_timer.start()
-    main(config_user, config_channel, config_token, twitch_chat_logger, config_drive_folder_id)
+    shoutout_thread = ShoutoutThread()
+    shoutout_thread.start()
+    main(config_user, config_channel, config_token, twitch_chat_logger)
