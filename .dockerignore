@@ -13,6 +13,7 @@ Dockerfile
 
 # Ignore specific text files
 BotToken.txt
+TabwireToken.txt
 token.pickle
 credentials.json
 *.log

@@ -8,15 +8,19 @@ services:
       POGSMITHY_TWITCH_CHANNEL: gunsmithy
       POGSMITHY_TWITCH_USER: Pogsmithy
       POGSMITHY_TWITCH_TOKEN_FILE: /run/secrets/pogsmithy_twitch_token
+      POGSMITHY_TWITCH_TABWIRE_TOKEN_FILE: /run/secrets/pogsmithy_twitch_tabwire_token
       POGSMITHY_TWITCH_GDRIVE_FOLDER: 1pJc2LJ81YPQvzLc3aru8f9xIRBHLJom_
       POGSMITHY_TWITCH_GDRIVE_PICKLE: /run/secrets/pogsmithy_twitch_gdrive_pickle
     secrets:
       - pogsmithy_twitch_token
+      - pogsmithy_twitch_tabwire_token
       - pogsmithy_twitch_gdrive_pickle
     restart: unless-stopped
 
 secrets:
   pogsmithy_twitch_token:
     file: BotToken.txt
+  pogsmithy_twitch_tabwire_token:
+    file: TabwireToken.txt
   pogsmithy_twitch_gdrive_pickle:
     file: token.pickle

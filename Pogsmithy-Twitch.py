@@ -45,6 +45,7 @@ twitch_chat_logger = None
 config_user = None
 config_channel = None
 config_token = None
+config_tabwire_token = None
 config_drive_folder_id = None
 config_drive_pickle = None
 log_timer = None
@@ -108,15 +109,16 @@ def spoiler_check(message_passed):
 
 class RankUpdateThread(threading.Thread):
 
-    def __init__(self, account_name):
+    def __init__(self, tabwire_token, account_name):
         threading.Thread.__init__(self)
+        self.tabwire_token = tabwire_token
         self.account_name = account_name
 
     def run(self):
-        get_rank_with_uuid(self.account_name)
+        get_siege_rank_with_uuid(self.tabwire_token, self.account_name)
 
 
-def get_rank_from_number(number):
+def get_short_siege_rank_from_number(number):
     rank_name_array = ['', '', '', '', '', 'Copper 3', 'Copper 2', 'Copper 1', 'Bronze 3', 'Bronze 2', 'Bronze 1',
                        'Silver 3', 'Silver 2', 'Silver 1', 'Gold 3', 'Gold 2', 'Gold 1',
                        'Plat 3', 'Plat 2', 'Plat 1', 'Diamond']
@@ -124,15 +126,26 @@ def get_rank_from_number(number):
     return rank_name_array[number]
 
 
-def get_rank_with_uuid(account_name):
+def update_siege_rank_with_uuid(tabwire_token, account_uuid):
+    requests.get(f'https://r6.apitab.com/update/{account_uuid}?cid={tabwire_token}')
+
+
+def get_siege_rank_with_uuid(tabwire_token, account_name):
     account_uuid = account_uuids[account_name]
-    response = requests.get('https://r6tab.com/api/player.php?p_id=' + account_uuid + '&action=update')
+    unix_stamp = int(datetime.utcnow().timestamp())
+
+    update_siege_rank_with_uuid(tabwire_token, account_uuid)
+
+    response = requests.get(f'https://r6.apitab.com/player/{account_uuid}?u={unix_stamp}&cid={tabwire_token}')
     response_json = response.json()
 
-    rank_names[account_name] = get_rank_from_number(int(response_json['p_NA_rank']))
-    rank_mmrs[account_name] = str(response_json['p_NA_currentmmr'])
+    rank_names[account_name] = get_short_siege_rank_from_number(response_json['ranked']['rank'])
+    rank_mmrs[account_name] = str(response_json['ranked']['mmr'])
 
-    rank_strings[account_name] = rank_names[account_name] + ' (' + rank_mmrs[account_name].replace('Current ', '') + ')'
+    if rank_names[account_name] == '' or rank_mmrs[account_name] == '0':
+        rank_strings[account_name] = "Not placed"
+    else:
+        rank_strings[account_name] = f"{rank_names[account_name]} ({rank_mmrs[account_name]})"
 
 
 def reset_backoff():
@@ -237,15 +250,15 @@ async def handle_command(websocket_client, channel, user, command, args):
         await send_message(websocket_client, channel, "/timeout " + user + " 1")
     elif command == "rank":
         if channel == 'gunsmithy':
-            monty_thread = RankUpdateThread('MontagneMontoya')
+            monty_thread = RankUpdateThread(config_tabwire_token, 'MontagneMontoya')
             monty_thread.start()
             monty_thread.join()
             rank_message = '/me MontagneMontoya: ' + rank_strings['MontagneMontoya']
         elif channel == 'sasslyn':
-            burt_thread = RankUpdateThread('Burt-Macklin')
-            dinger_thread = RankUpdateThread('Dinger-Bringer')
-            jerry_thread = RankUpdateThread('Jerry-Gergich')
-            doubleeh_thread = RankUpdateThread('DoubleEh7')
+            burt_thread = RankUpdateThread(config_tabwire_token, 'Burt-Macklin')
+            dinger_thread = RankUpdateThread(config_tabwire_token, 'Dinger-Bringer')
+            jerry_thread = RankUpdateThread(config_tabwire_token, 'Jerry-Gergich')
+            doubleeh_thread = RankUpdateThread(config_tabwire_token, 'DoubleEh7')
             burt_thread.start()
             dinger_thread.start()
             jerry_thread.start()
@@ -254,11 +267,14 @@ async def handle_command(websocket_client, channel, user, command, args):
             dinger_thread.join()
             jerry_thread.join()
             doubleeh_thread.join()
-            rank_message = '/me Burt\'s Rank: ' + rank_strings['Burt-Macklin'] + \
-                           ' // Dinger\'s Rank: ' + rank_strings['Dinger-Bringer'] + \
-                           ' // Jerry\'s Rank: ' + rank_strings['Jerry-Gergich'] + \
-                           ' // DE7\'s Rank: ' + rank_strings['DoubleEh7'] + \
-                           ' sasslyFlex'
+            try:
+                rank_message = '/me Burt\'s Rank: ' + rank_strings['Burt-Macklin'] + \
+                               ' // Dinger\'s Rank: ' + rank_strings['Dinger-Bringer'] + \
+                               ' // Jerry\'s Rank: ' + rank_strings['Jerry-Gergich'] + \
+                               ' // DE7\'s Rank: ' + rank_strings['DoubleEh7'] + \
+                               ' sasslyFlex'
+            except KeyError:
+                rank_message = "Woops, can't get your rank right now. Let Gunsmithy know or try again."
         else:
             rank_message = '/me I don\'t know you...'
         await send_message(websocket_client, channel, rank_message)
@@ -373,7 +389,7 @@ class ShoutoutThread(threading.Thread):
 
 
 async def shout_out(websocket_client, channel_name, display_name, login):
-    shout_out_message = f"HEY! Make sure you shoot {display_name} a good ole follow over at http://twitch.tv/{login}"
+    shout_out_message = f"HEY! Make sure you shoot {display_name} a good ole follow over at https://twitch.tv/{login}"
     await send_message(websocket_client, channel_name, shout_out_message)
 
 
@@ -422,6 +438,8 @@ def config():
     bot_channel = os.getenv('POGSMITHY_TWITCH_CHANNEL')
     bot_token = os.getenv('POGSMITHY_TWITCH_TOKEN')
     bot_token_file = os.getenv('POGSMITHY_TWITCH_TOKEN_FILE')
+    bot_tabwire_token = os.getenv('POGSMITHY_TWITCH_TABWIRE_TOKEN')
+    bot_tabwire_token_file = os.getenv('POGSMITHY_TWITCH_TABWIRE_TOKEN_FILE')
     bot_drive_folder = os.getenv('POGSMITHY_TWITCH_GDRIVE_FOLDER')
     bot_drive_pickle_file = os.getenv('POGSMITHY_TWITCH_GDRIVE_PICKLE')
 
@@ -431,6 +449,9 @@ def config():
     parser.add_argument('--token', dest='token', help='The Twitch OAuth token used to run the bot.')
     parser.add_argument('--token-file', dest='token_file', help='The path to the file containing the Twitch OAuth token'
                                                                 ' used to run the bot.')
+    parser.add_argument('--tabwire-token', dest='tabwire_token', help='The Tabwire API token used to call their APIs.')
+    parser.add_argument('--tabwire-token-file', dest='tabwire_token_file', help='The path to the file containing the '
+                                                                                'Tabwire API token.')
     parser.add_argument('--gdrive-folder', dest='gdrive_folder', help='The ID of the Google Drive folder for chat logs'
                                                                       'if desired.')
     parser.add_argument('--gdrive-pickle', dest='gdrive_pickle', help='The path to the Google Drive credentials pickle '
@@ -473,6 +494,22 @@ def config():
         logger.error('Bot token could not be derived from environment or arguments. Aborting...')
         sys.exit(1)
 
+    if args.tabwire_token is not None:
+        logger.info('Using --tabwire-token command-line argument...')
+        tabwire_token = args.tabwire_token
+    elif args.tabwire_token_file is not None:
+        logger.info('Using --tabwire-token-file command-line argument...')
+        tabwire_token = read_secret_file(args.tabwire_token_file)
+    elif bot_tabwire_token is not None:
+        logger.info('Using POGSMITHY_TWITCH_TABWIRE_TOKEN environment variable...')
+        tabwire_token = bot_tabwire_token
+    elif bot_tabwire_token_file is not None:
+        logger.info('Using POGSMITHY_TWITCH_TABWIRE_TOKEN_FILE environment variable...')
+        tabwire_token = read_secret_file(bot_tabwire_token_file)
+    else:
+        logger.error('Tabwire API token could not be derived from environment or arguments. Aborting...')
+        sys.exit(1)
+
     if args.gdrive_folder is not None:
         logger.info('Using --gdrive-folder command-line argument...')
         folder_id = args.gdrive_folder
@@ -493,7 +530,7 @@ def config():
         logger.info('No Google Drive pickle file provided. Chat logs will not be uploaded.')
         drive_pickle_file = None
 
-    return user, channel, token, folder_id, drive_pickle_file
+    return user, channel, token, tabwire_token, folder_id, drive_pickle_file
 
 
 def create_chat_logger():
@@ -620,7 +657,8 @@ def receive_signal(signal_number, frame):
 
 
 if __name__ == "__main__":
-    config_user, config_channel, config_token, config_drive_folder_id, config_drive_pickle = config()
+    config_user, config_channel, config_token, config_tabwire_token, config_drive_folder_id, config_drive_pickle = \
+        config()
     twitch_chat_logger = create_chat_logger()
     signal.signal(signal.SIGINT, receive_signal)
     signal.signal(signal.SIGTERM, receive_signal)
