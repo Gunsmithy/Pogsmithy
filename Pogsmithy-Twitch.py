@@ -52,9 +52,11 @@ log_timer = None
 log_frequency = 86400  # 1 day
 shoutout_queue = queue.Queue()
 
-rank_names = {}
-rank_mmrs = {}
-rank_strings = {}
+siege_rank_names = {}
+siege_rank_mmrs = {}
+siege_rank_strings = {}
+valorant_rank_names = {}
+valorant_rank_strings = {}
 account_uuids = {
     'MontagneMontoya': '3cb45a4a-9208-48ac-8690-27dcbf1b6604',
     'Burt-Macklin': '8da0d780-e164-408b-ab03-26bc329346bb',
@@ -107,7 +109,17 @@ def spoiler_check(message_passed):
     return False
 
 
-class RankUpdateThread(threading.Thread):
+class ValorantRankUpdateThread(threading.Thread):
+
+    def __init__(self, account_name):
+        threading.Thread.__init__(self)
+        self.account_name = account_name
+
+    def run(self):
+        get_valorant_rank_with_name(self.account_name)
+
+
+class SiegeRankUpdateThread(threading.Thread):
 
     def __init__(self, tabwire_token, account_name):
         threading.Thread.__init__(self)
@@ -126,6 +138,14 @@ def get_short_siege_rank_from_number(number):
     return rank_name_array[number]
 
 
+def get_valorant_rank_from_number(number):
+    rank_name_array = ['Unrated', '', '', 'Iron 1', 'Iron 2', 'Iron 3', 'Bronze 1', 'Bronze 2', 'Bronze 3', 'Silver 1',
+                       'Silver 2', 'Silver 3', 'Gold 1', 'Gold 2', 'Gold 3', 'Platinum 1', 'Platinum 2', 'Platinum 3',
+                       'Diamond 1', 'Diamond 2', 'Diamond 3', 'Immortal 1', 'Immortal 2', 'Immortal 3', 'Radiant']
+
+    return rank_name_array[number]
+
+
 def update_siege_rank_with_uuid(tabwire_token, account_uuid):
     requests.get(f'https://r6.apitab.com/update/{account_uuid}?cid={tabwire_token}')
 
@@ -139,13 +159,26 @@ def get_siege_rank_with_uuid(tabwire_token, account_name):
     response = requests.get(f'https://r6.apitab.com/player/{account_uuid}?u={unix_stamp}&cid={tabwire_token}')
     response_json = response.json()
 
-    rank_names[account_name] = get_short_siege_rank_from_number(response_json['ranked']['rank'])
-    rank_mmrs[account_name] = str(response_json['ranked']['mmr'])
+    siege_rank_names[account_name] = get_short_siege_rank_from_number(response_json['ranked']['rank'])
+    siege_rank_mmrs[account_name] = str(response_json['ranked']['mmr'])
 
-    if rank_names[account_name] == '' or rank_mmrs[account_name] == '0':
-        rank_strings[account_name] = "Not placed"
+    if siege_rank_names[account_name] == '' or siege_rank_mmrs[account_name] == '0':
+        siege_rank_strings[account_name] = "Not placed"
     else:
-        rank_strings[account_name] = f"{rank_names[account_name]} ({rank_mmrs[account_name]})"
+        siege_rank_strings[account_name] = f"{siege_rank_names[account_name]} ({siege_rank_mmrs[account_name]})"
+
+
+def get_valorant_rank_with_name(account_name):
+    formatted_name = account_name.replace('#', '-').lower()
+    response = requests.get(f'https://valorant.iesdev.com/player/{formatted_name}')
+    response_json = response.json()
+
+    valorant_rank_names[account_name] = get_valorant_rank_from_number(response_json['ranks']['competitive']['tier'])
+
+    if valorant_rank_names[account_name] == '':
+        valorant_rank_strings[account_name] = "Not placed"
+    else:
+        valorant_rank_strings[account_name] = f"{valorant_rank_names[account_name]}"
 
 
 def reset_backoff():
@@ -249,16 +282,18 @@ async def handle_command(websocket_client, channel, user, command, args):
     elif command == "vanish":
         await send_message(websocket_client, channel, "/timeout " + user + " 1")
     elif command == "rank":
+        await send_message(websocket_client, channel, "Which rank? Try !r6rank or !valrank")
+    elif command == "r6rank" or command == "siegerank":
         if channel == 'gunsmithy':
-            monty_thread = RankUpdateThread(config_tabwire_token, 'MontagneMontoya')
+            monty_thread = SiegeRankUpdateThread(config_tabwire_token, 'MontagneMontoya')
             monty_thread.start()
             monty_thread.join()
-            rank_message = '/me MontagneMontoya: ' + rank_strings['MontagneMontoya']
+            rank_message = '/me MontagneMontoya: ' + siege_rank_strings['MontagneMontoya']
         elif channel == 'sasslyn':
-            burt_thread = RankUpdateThread(config_tabwire_token, 'Burt-Macklin')
-            dinger_thread = RankUpdateThread(config_tabwire_token, 'Dinger-Bringer')
-            jerry_thread = RankUpdateThread(config_tabwire_token, 'Jerry-Gergich')
-            doubleeh_thread = RankUpdateThread(config_tabwire_token, 'DoubleEh7')
+            burt_thread = SiegeRankUpdateThread(config_tabwire_token, 'Burt-Macklin')
+            dinger_thread = SiegeRankUpdateThread(config_tabwire_token, 'Dinger-Bringer')
+            jerry_thread = SiegeRankUpdateThread(config_tabwire_token, 'Jerry-Gergich')
+            doubleeh_thread = SiegeRankUpdateThread(config_tabwire_token, 'DoubleEh7')
             burt_thread.start()
             dinger_thread.start()
             jerry_thread.start()
@@ -268,13 +303,22 @@ async def handle_command(websocket_client, channel, user, command, args):
             jerry_thread.join()
             doubleeh_thread.join()
             try:
-                rank_message = '/me Burt\'s Rank: ' + rank_strings['Burt-Macklin'] + \
-                               ' // Dinger\'s Rank: ' + rank_strings['Dinger-Bringer'] + \
-                               ' // Jerry\'s Rank: ' + rank_strings['Jerry-Gergich'] + \
-                               ' // DE7\'s Rank: ' + rank_strings['DoubleEh7'] + \
+                rank_message = '/me Burt\'s Rank: ' + siege_rank_strings['Burt-Macklin'] + \
+                               ' // Dinger\'s Rank: ' + siege_rank_strings['Dinger-Bringer'] + \
+                               ' // Jerry\'s Rank: ' + siege_rank_strings['Jerry-Gergich'] + \
+                               ' // DE7\'s Rank: ' + siege_rank_strings['DoubleEh7'] + \
                                ' sasslyFlex'
             except KeyError:
                 rank_message = "Woops, can't get your rank right now. Let Gunsmithy know or try again."
+        else:
+            rank_message = '/me I don\'t know you...'
+        await send_message(websocket_client, channel, rank_message)
+    elif command == "valrank" or command == "valorantrank":
+        if channel == 'sasslyn':
+            sass_thread = ValorantRankUpdateThread('Sasslyn#5455')
+            sass_thread.start()
+            sass_thread.join()
+            rank_message = '/me Sass\' Rank: ' + valorant_rank_strings['Sasslyn#5455'] + ' sasslyFlex'
         else:
             rank_message = '/me I don\'t know you...'
         await send_message(websocket_client, channel, rank_message)
@@ -302,9 +346,9 @@ async def handle_message(websocket_client, channel, user, message):
     msg_lower = message.lower()
 
     # CHECK FOR POTENTIAL LAST OF US 2 SPOILERS
-    if spoiler_check(message):
-        await send_message(websocket_client, channel, "/timeout " + user + " 1")
-        await send_message(websocket_client, channel, "@" + user + " No Last of Us 2 spoilers! marvHowdy")
+    # if spoiler_check(message):
+    #     await send_message(websocket_client, channel, "/timeout " + user + " 1")
+    #     await send_message(websocket_client, channel, "@" + user + " No Last of Us 2 spoilers! marvHowdy")
 
     # If a chat message starts with an exclamation point, try to run it as a command
     if message.startswith('!'):
@@ -329,6 +373,8 @@ async def handle_message(websocket_client, channel, user, message):
     elif " lit " in msg_lower or msg_lower.startswith('lit ') or msg_lower.endswith(' lit') or msg_lower == 'lit':
         if channel == 'jrod0901':
             await send_message(websocket_client, channel, "blobSabers blobSabers blobSabers blobSabers blobSabers")
+    elif (channel == 'brittahkiin' or channel == 'iggyow') and 'bort' in msg_lower:
+        await send_message(websocket_client, channel, "bortTap bortTap bortTap bortTap bortTap")
     elif "pogchamp" in msg_lower or "poggers" in msg_lower:
         pog_champ_count = msg_lower.count("pogchamp")
         poggers_count = msg_lower.count("poggers")
