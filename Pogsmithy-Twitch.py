@@ -20,10 +20,10 @@ from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
-last_huge_pog = datetime.utcnow()
 last_huge_squad = datetime.utcnow()
-huge_pog_cooldown_seconds = 30
 huge_squad_cooldown_seconds = 30
+last_marker = datetime.utcnow()
+marker_cooldown_seconds = 15
 
 twitch_wss_uri = "wss://irc-ws.chat.twitch.tv:443"
 max_backoff = 64
@@ -277,8 +277,6 @@ async def handle_command(websocket_client, channel, user, command, args):
         await send_message(websocket_client, channel, "!permit Gunsmithy")
     elif command == "bobs":
         await send_message(websocket_client, channel, '( CoolStoryBob )( CoolStoryBob )')
-    elif command == "fortnite":
-        await send_message(websocket_client, channel, 'https://streamable.com/wag7s')
     elif command == "vanish":
         await send_message(websocket_client, channel, "/timeout " + user + " 1")
     elif command == "rank":
@@ -325,19 +323,19 @@ async def handle_command(websocket_client, channel, user, command, args):
     elif command == "delhype":
         await send_message(websocket_client, channel,
                            'sasslySip sasslyHype sasslySip sasslyHype sasslySip sasslyHype sasslySip')
+    elif command == "marker":
+        await create_marker(websocket_client, channel, ' '.join(args))
     else:
         logger.debug("Unrecognized command: " + command)
 
 
-async def huge_pogs(websocket_client, channel):
-    global last_huge_pog
+async def create_marker(websocket_client, channel, marker_message):
+    global last_marker
     current_datetime = datetime.utcnow()
-    if (current_datetime - last_huge_pog).seconds > huge_pog_cooldown_seconds or \
-            (current_datetime - last_huge_pog).days > 0:
-        await send_message(websocket_client, channel, "psi1 psi2 psi3")
-        await send_message(websocket_client, channel, "psi4 psi5 psi6")
-        await send_message(websocket_client, channel, "psi7 psi8 psi9")
-        last_huge_pog = current_datetime
+    if (current_datetime - last_marker).seconds > marker_cooldown_seconds or \
+            (current_datetime - last_marker).days > 0:
+        await send_message(websocket_client, channel, '/marker ' + marker_message)
+        last_marker = current_datetime
 
 
 async def handle_message(websocket_client, channel, user, message):
@@ -360,7 +358,7 @@ async def handle_message(websocket_client, channel, user, message):
 
     # Otherwise, look for other fun stuff in the message
     elif "huge pogs" in msg_lower:
-        await huge_pogs(websocket_client, channel)
+        await send_message(websocket_client, channel, "FeelsBadMan")
     elif "huge squad" in msg_lower:
         if channel == 'sasslyn':
             current_datetime = datetime.utcnow()
@@ -388,10 +386,8 @@ async def handle_message(websocket_client, channel, user, message):
             await send_message(websocket_client, channel, "BIG POGS!")
         elif pog_count == 4:
             await send_message(websocket_client, channel, "HUUUUUGE POGS!")
-        elif pog_count == 5:
+        elif pog_count > 4:
             await send_message(websocket_client, channel, "MASSSSSIVE POGS!")
-        elif pog_count > 5:
-            await huge_pogs(websocket_client, channel)
     elif "pogs" in msg_lower:
         pogs_count = msg_lower.count("pogs")
         poggers_string = ''
