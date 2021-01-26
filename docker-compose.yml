@@ -1,9 +1,9 @@
 ---
 version: "3.7"
 services:
-  pogsmithy-twitch-gunsmithy:
-    image: gunsmithy/personal:pogsmithy-twitch
-    container_name: pogsmithy-twitch-gunsmithy
+  pogsmithy-twitch-gunsmithy-test:
+    image: gunsmithy/pogsmithy
+    container_name: pogsmithy-twitch-gunsmithy-test
     environment:
       POGSMITHY_TWITCH_CHANNEL: gunsmithy
       POGSMITHY_TWITCH_USER: Pogsmithy

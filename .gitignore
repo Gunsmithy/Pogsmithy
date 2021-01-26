@@ -107,6 +107,9 @@ venv.bak/
 *.crt
 *.key
 
+# Ignore Jetbrains
+.idea
+
 # Ignore specific text files
 BotToken.txt
 TabwireToken.txt

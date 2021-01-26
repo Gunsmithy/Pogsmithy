@@ -170,7 +170,8 @@ def get_siege_rank_with_uuid(tabwire_token, account_name):
 
 def get_valorant_rank_with_name(account_name):
     formatted_name = account_name.replace('#', '-').lower()
-    response = requests.get(f'https://valorant.iesdev.com/player/{formatted_name}')
+    unix_stamp_millis = int(datetime.utcnow().timestamp()) * 1000
+    response = requests.get(f'https://valorant.iesdev.com/player/{formatted_name}?version={unix_stamp_millis}')
     response_json = response.json()
 
     valorant_rank_names[account_name] = get_valorant_rank_from_number(response_json['ranks']['competitive']['tier'])
