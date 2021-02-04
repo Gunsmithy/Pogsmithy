@@ -110,6 +110,9 @@ venv.bak/
 # Ignore Jetbrains
 .idea
 
+# Ignore VS Code
+.vscode
+
 # Ignore specific text files
 BotToken.txt
 TabwireToken.txt

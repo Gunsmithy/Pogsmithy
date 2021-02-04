@@ -19,11 +19,14 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from cachetools import TTLCache
 
 last_huge_squad = datetime.utcnow()
 huge_squad_cooldown_seconds = 30
 last_marker = datetime.utcnow()
 marker_cooldown_seconds = 15
+
+vanish_user_cache = TTLCache(maxsize=256, ttl=3600)
 
 twitch_wss_uri = "wss://irc-ws.chat.twitch.tv:443"
 max_backoff = 64
@@ -279,7 +282,9 @@ async def handle_command(websocket_client, channel, user, command, args):
     elif command == "bobs":
         await send_message(websocket_client, channel, '( CoolStoryBob )( CoolStoryBob )')
     elif command == "vanish":
-        await send_message(websocket_client, channel, "/timeout " + user + " 1")
+        if not vanish_user_cache.get(user):
+            await send_message(websocket_client, channel, "/timeout " + user + " 1")
+            vanish_user_cache[user] = True
     elif command == "rank":
         await send_message(websocket_client, channel, "Which rank? Try !r6rank or !valrank")
     elif command == "r6rank" or command == "siegerank":
