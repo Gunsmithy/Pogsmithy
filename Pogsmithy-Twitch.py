@@ -261,6 +261,7 @@ async def send_message(websocket_client, channel_name, message):
 
 
 async def handle_command(websocket_client, channel, user, command, args):
+    logger.info(f'Handling "{command}" command for {user} with args: {args}')
     if command == 'pogproxy':
         proxy_command = ' '.join(args)
         logger.info(user + ' sent a pogproxy command: ' + proxy_command)
@@ -268,9 +269,6 @@ async def handle_command(websocket_client, channel, user, command, args):
             await send_message(websocket_client, channel, proxy_command)
     elif command == "paxy":
         await send_message(websocket_client, channel, "https://i.imgur.com/7mqx3DV.png")
-    # elif command == "dylan":
-    #     c.privmsg(self.channel,
-    #               "Dylan is Gunsmithy. He is from Canada and he is not my brother or my boyfriend. normiesOUT")
     elif command == "iggy":
         await send_message(websocket_client, channel, "Unlucky my dood FeelsBadMan")
     elif command == "angery" or command == "grompy":
@@ -330,7 +328,10 @@ async def handle_command(websocket_client, channel, user, command, args):
         await send_message(websocket_client, channel,
                            'sasslySip sasslyHype sasslySip sasslyHype sasslySip sasslyHype sasslySip')
     elif command == "marker":
-        await create_marker(websocket_client, channel, ' '.join(args))
+        if args is not None and len(args) > 0:
+            await create_marker(websocket_client, channel, ' '.join(args))
+        else:
+            await create_marker(websocket_client, channel, f"{user}'s marker")
     else:
         logger.debug("Unrecognized command: " + command)
 
