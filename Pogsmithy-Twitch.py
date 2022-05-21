@@ -320,7 +320,9 @@ async def handle_command(websocket_client, channel, user, command, args):
             sass_thread = ValorantRankUpdateThread('Sasslyn#5455')
             sass_thread.start()
             sass_thread.join()
-            rank_message = '/me Sass\' Rank: ' + valorant_rank_strings['Sasslyn#5455'] + ' sasslyFlex'
+            rank_message = '/me Sass\' Rank: ' + valorant_rank_strings.get('Sasslyn#5455', 'Unknown') + ' sasslyFlex'
+            if not valorant_rank_strings.get('Sasslyn#5455'):
+                logger.error("Unable to find rank in valorant_rank_strings dict.")
         else:
             rank_message = '/me I don\'t know you...'
         await send_message(websocket_client, channel, rank_message)
